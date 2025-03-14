@@ -1,38 +1,44 @@
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from Controller import Controller
 from Environment import GridWorld
 
 from itertools import count
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 import random
+from torch.utils.data import DataLoader, TensorDataset
 
 from Memory import TransitionGCSL, ReplayMemory, ExperienceMemory
 from VAE import VAE, vae_loss_fn
-from WorldModel import WorldModelRNN
-from worlds import world_small
+from WorldModel import MDNRNN, sample_mdn, sample_mdn_mix
+from worlds import world_small, world_big, small_worlds
+
+VAE_DIR = "models/vae_small_latent_12.pth"
+VAE_TRAIN = False
+WM_DIR = "models/world_model_01.pth"
+#WM_TRAIN = True
+WM_TRAIN = False
+CONTROLLER_DIR = "models/controller_01.pth"
+#CONTROLLER_TRAIN = True
+CONTROLLER_TRAIN = False
 
 OBS_SIZE = 5
 LATENT_DIM = 12
 HIDDEN_DIM = 64
 ACTION_SIZE = 4
-VAE_DIR = "models/vae_5.pth"
-#VAE_DIR = None
-WM_DIR = "models/world_model_5.pth"
-#WM_DIR = None
-CONTROLLER_DIR = "models/controller_5.pth"
-#CONTROLLER_DIR = None
 
-obstacles = np.argwhere(world_small == 1)
-grid_world = GridWorld(width=world_small.shape[0], height=world_small.shape[1], horizon=200, obstacles=obstacles)
+WORLD_INDEX = 0
+VAE_BATCH_SIZE = 32
 
-controller = Controller(z_dim=LATENT_DIM, h_dim=HIDDEN_DIM, a_dim=ACTION_SIZE, env_action_space=grid_world.action_space)
+grid_worlds = [GridWorld(width=world.shape[0], height=world.shape[1], horizon=100, obstacles=np.argwhere(world==1)) for world in small_worlds]
+
+controller = Controller(z_dim=LATENT_DIM, h_dim=HIDDEN_DIM, a_dim=ACTION_SIZE, env_action_space=grid_worlds[WORLD_INDEX].action_space)
 vae = VAE(input_dim=OBS_SIZE, latent_dim=LATENT_DIM, hidden_dim=256)
 vae_optimizer = torch.optim.Adam(vae.parameters(), lr=1e-5)
-world_model = WorldModelRNN(latent_size=LATENT_DIM, action_size=ACTION_SIZE, hidden_size=HIDDEN_DIM, num_layers=3, lr=1e-3)
-wm_loss_fn = torch.nn.MSELoss()
+vae_scheduler = ReduceLROnPlateau(vae_optimizer, mode='min', factor=0.1, patience=10000)
+world_model = MDNRNN(latent_dim=LATENT_DIM, action_dim=ACTION_SIZE, hidden_dim=HIDDEN_DIM, num_layers=2, num_gaussians=2, lr=1e-3)
 
 # init world model weights
 for name, param in world_model.named_parameters():
@@ -105,59 +111,77 @@ def plot_training(episode_durations, vae_loss, wm_loss, controller_loss, show_re
     #axs[1, 0].legend()
     #axs[1, 1].legend()
 
-    # Adjust y-limits for the last 100 episodes
+    # Adjust y-limits for the last 200 episodes
     def set_dynamic_ylim(ax, data, label):
-        if len(data) >= 100:
-            last_100 = data[-100:]
-            max_val = max(last_100)
+        if len(data) >= 200:
+            last_200 = data[-200:]
+            max_val = max(last_200)
             ax.set_ylim(0, max_val + 0.1 * abs(max_val))
         ax.legend([label])
 
     #set_dynamic_ylim(axs[0, 1], vae_loss, 'VAE Loss')
     #set_dynamic_ylim(axs[1, 0], wm_loss, 'World Model Loss')
-    #set_dynamic_ylim(axs[1, 1], controller_loss, 'Controller Loss')
+    set_dynamic_ylim(axs[1, 1], controller_loss, 'Controller Loss')
 
     # Refresh the figure
     plt.tight_layout()
     plt.pause(0.001)  # Pause a bit so that plots are updated
 
 # Train VAE
-if VAE_DIR is not None:
+if not VAE_TRAIN:
     vae.load_state_dict(torch.load(VAE_DIR, weights_only=True))
     print("Loaded VAE")
 else:
-    observations = grid_world.get_all_obs()
-    observations = [observation["agent"] for observation in observations]
-    print("Training VAE...")
-    for i in range(64000):
-        n = random.sample(range(len(observations)), 1)[0]
-    
-        vae_optimizer.zero_grad()
-        observation = torch.tensor(observations[n]).unsqueeze(0).unsqueeze(0)
-        obs_reconstructed, mean, log_var = vae(observation)
-        loss = vae_loss_fn(observation, obs_reconstructed, mean, log_var, beta=0.0001, target_std=0.1)
-        loss.backward()
-        vae_optimizer.step()
-        vae_loss.append(loss.item())
-    
-        if i%100 == 0:
-            plot_training(episode_durations, vae_loss, wm_loss, controller_loss)
-    
-    torch.save(vae.state_dict(), "models/vae_5.pth")
+    # Collect all agent observations from grid worlds
+    observations = [world.get_all_obs() for world in grid_worlds]
+    observations = np.array([obs["agent"] for world_obs in observations for obs in world_obs])
 
-if WM_DIR is not None:
+    # Convert observations to a PyTorch tensor
+    observations_tensor = torch.tensor(observations).unsqueeze(1)  # Add channel dim (N, 1, H, W)
+    
+    # Create a DataLoader for batching
+    dataset = TensorDataset(observations_tensor)
+    dataloader = DataLoader(dataset, batch_size=VAE_BATCH_SIZE, shuffle=True)
+
+    print("Training VAE...")
+    for epoch in range(100000 // len(dataloader)):  # Iterate over epochs
+        for batch in dataloader:
+            batch_obs = batch[0]  # Get the batch
+            
+            vae_optimizer.zero_grad()
+            obs_reconstructed, mean, log_var = vae(batch_obs)
+            loss = vae_loss_fn(batch_obs, obs_reconstructed, mean, log_var, beta=0.0001, target_std=0.1)
+            
+            loss.backward()
+            vae_optimizer.step()
+            vae_scheduler.step(loss)
+            vae_loss.append(loss.item())
+
+        # Log every 100 iterations
+        if epoch % 100 == 0:
+            plot_training(episode_durations, vae_loss, wm_loss, controller_loss)
+
+    torch.save(vae.state_dict(), VAE_DIR)
+
+
+def show_hidden(state):
+    plt.figure()
+    plt.imshow(vae.decode(state).squeeze().detach().numpy())
+    plt.show(block=False)
+
+if not WM_TRAIN:
     world_model.load_state_dict(torch.load(WM_DIR, weights_only=True))
     print("Loaded world model")
 
-if CONTROLLER_DIR is not None:
+if not CONTROLLER_TRAIN:
     controller.policy_net.load_state_dict(torch.load(CONTROLLER_DIR, weights_only=True))
     print("Loaded controller")
 
 goal = np.full((5, 5), 0, dtype=np.float32)
-for i in range(3000):
+for i in range(1200):
     print("Epoch: " + str(i))
-    state, info = grid_world.reset(goal)
-    predictive_hidden_state = world_model.reset_hidden_state()
+    state, info = grid_worlds[WORLD_INDEX].reset(goal)
+    predictive_hidden_state, _, _, _ = world_model.reset_hidden_state()
 
     with torch.no_grad():
         latent_state, _ = vae.encode(torch.tensor(state["agent"]).unsqueeze(0))
@@ -168,12 +192,13 @@ for i in range(3000):
         with torch.no_grad():
             # Controller
             concat_state = torch.cat((latent_state, predictive_hidden_state, goal), dim=1)
-            action = controller.select_action(concat_state)
+            action = controller.select_action_epsilon_greedy(concat_state)
+            #print("Selected action: ", action)
     
-            next_state, reward, terminated, truncated, _ = grid_world.step(torch.argmax(action, dim=1).item())
+            next_state, reward, terminated, truncated, _ = grid_worlds[WORLD_INDEX].step(torch.argmax(action, dim=1).item())
 
             # World Model
-            predictive_hidden_state = world_model(action.unsqueeze(0), latent_state.unsqueeze(0)) # Add sequence length dim with unsqueeze
+            predictive_hidden_state, pi, sigma, mu  = world_model(action.unsqueeze(0), latent_state.unsqueeze(0)) # Add sequence length dim with unsqueeze
     
             # VAE
             next_latent_state, _ = vae.encode(torch.tensor(next_state["agent"]).unsqueeze(0))
@@ -181,10 +206,11 @@ for i in range(3000):
         trajectory.append(TransitionGCSL(state["agent"], latent_state, predictive_hidden_state, next_latent_state, action, goal))
 
         # Apply mapping to latent space
-        y = F.leaky_relu(world_model.fc(predictive_hidden_state))
-        y = world_model.output_layer(y)
-        prediction_error = experience_memory.criterion(y, next_latent_state)
+        #y, _ = sample_mdn_mix(pi, sigma, mu)
+        _, y = sample_mdn(pi, sigma, mu)
         breakpoint()
+
+        prediction_error = experience_memory.criterion(y, next_latent_state)
         experience_memory.append(state["agent"], latent_state, predictive_hidden_state, next_latent_state, prediction_error)
 
         state = next_state
@@ -204,7 +230,7 @@ for i in range(3000):
     goal = experience_memory.sample().state
 
     ### TRAINING
-    if WM_DIR is None:
+    if WM_TRAIN:
         # Train WorldModelRNN
         print("Training World Model...")
         world_model.reset_hidden_state()
@@ -219,16 +245,16 @@ for i in range(3000):
         latent_states = torch.stack(latent_states, dim=0)
         next_latent_states = torch.stack(next_latent_states, dim=0)
     
-        loss = world_model.train_sequence(actions, latent_states, next_latent_states, wm_loss_fn)
+        loss = world_model.train_sequence(actions, latent_states, next_latent_states)
         world_model.scheduler.step(loss)
-        print(f"Learning Rate = {world_model.scheduler.get_last_lr()}")
+        print(f"World model learning rate = {world_model.scheduler.get_last_lr()}")
         wm_loss.append(loss)
 
-    if CONTROLLER_DIR is None:
-        if i >= 1000:
+    if CONTROLLER_TRAIN:
+        if i >= 700:
             # Train controller only if enough data is available
-            replay_memory.insert_trajectory(trajectory, i-1000)
-            if len(replay_memory) < 100:
+            replay_memory.insert_trajectory(trajectory, i-700)
+            if len(replay_memory) < 20:
                 continue
     
             print("Training Controller...")
@@ -240,7 +266,8 @@ for i in range(3000):
     
                 loss = controller.optimization_step(transition)
                 controller_loss.append(loss)
+            print(f"Controller learning rate = {controller.scheduler.get_last_lr()}")
 
-torch.save(world_model.state_dict(), "models/world_model_5.pth")
-torch.save(controller.policy_net.state_dict(), "models/controller_5.pth")
+torch.save(world_model.state_dict(), WM_DIR)
+torch.save(controller.policy_net.state_dict(), CONTROLLER_DIR)
 breakpoint()

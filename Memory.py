@@ -58,13 +58,11 @@ class ReplayMemory:
         # Relabel trajectory and insert into replay_memory
         # Schedule:
         for i, goal in enumerate(trajectory):
-            if i > 5 and episode < 500:
+            if i > 5 and episode < 100:
                 continue
-            elif i > 10 and episode < 1000:
+            elif i > 10 and episode < 200:
                 continue
-            elif i > 15 and episode < 1500:
-                continue
-            elif i > 20 and episode < 2000:
+            elif i > 15 and episode < 300:
                 continue
             for j in range(i):
                 # Replace goal with "correct" subgoal
