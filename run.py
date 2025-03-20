@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from Memory import TransitionGCSL, ReplayMemory, ExperienceMemory
 from VAE import VAE, vae_loss_fn
-from WorldModel import MDNRNN, sample_mdn_mix
+from WorldModel import MDNRNN, sample_mdn
 from worlds import small_worlds
 from utils import Plotter
 from params import *
@@ -24,7 +24,7 @@ controller = Controller(z_dim=LATENT_DIM, h_dim=HIDDEN_DIM, a_dim=ACTION_SIZE, e
 vae = VAE(input_dim=OBS_SIZE, latent_dim=LATENT_DIM, hidden_dim=256)
 vae_optimizer = torch.optim.Adam(vae.parameters(), lr=1e-5)
 vae_scheduler = ReduceLROnPlateau(vae_optimizer, mode='min', factor=0.1, patience=10000)
-world_model = MDNRNN(latent_dim=LATENT_DIM, action_dim=ACTION_SIZE, hidden_dim=HIDDEN_DIM, num_layers=5, num_gaussians=10, lr=1e-3)
+world_model = MDNRNN(latent_dim=LATENT_DIM, action_dim=ACTION_SIZE, hidden_dim=HIDDEN_DIM, num_layers=1, num_gaussians=1, lr=1e-3)
 
 # init world model weights
 for name, param in world_model.named_parameters():
@@ -110,7 +110,7 @@ for i in range(100000):
             next_state, reward, terminated, truncated, _ = grid_worlds[WORLD_INDEX].step(torch.argmax(action, dim=1).item())
 
             # World Model
-            predictive_hidden_state, pi, mu, L  = world_model(action, latent_state)
+            predictive_hidden_state, pi, sigma, mu = world_model(action, latent_state)
     
             # VAE
             next_latent_state, _ = vae.encode(torch.tensor(next_state["agent"]).unsqueeze(0))
@@ -118,8 +118,8 @@ for i in range(100000):
         trajectory.append(TransitionGCSL(state["agent"], latent_state, predictive_hidden_state, next_latent_state, action, goal))
 
         # Apply mapping to latent space
-        y, _ = sample_mdn_mix(pi, mu, L)
-        breakpoint()
+        y, _ = sample_mdn(pi, sigma, mu)
+        #breakpoint()
 
         prediction_error = experience_memory.criterion(y, next_latent_state)
         experience_memory.append(state["agent"], latent_state, predictive_hidden_state, next_latent_state, prediction_error)
@@ -174,27 +174,6 @@ for i in range(100000):
             wm_best_loss = loss
             print("Saving checkpoint...")
             torch.save(world_model.state_dict(), WM_DIR)
-
-
-#    if WM_TRAIN:
-#        # Train WorldModelRNN
-#        print("Training World Model...")
-#        world_model.reset_hidden_state()
-#        actions = []
-#        latent_states = []
-#        next_latent_states = []
-#        for transition in trajectory:
-#            actions.append(transition.action)
-#            latent_states.append(transition.latent_state)
-#            next_latent_states.append(transition.next_latent_state)
-#        actions = torch.stack(actions, dim=0)
-#        latent_states = torch.stack(latent_states, dim=0)
-#        next_latent_states = torch.stack(next_latent_states, dim=0)
-#    
-#        loss = world_model.train_sequence(actions, latent_states, next_latent_states)
-#        world_model.scheduler.step(loss)
-#        print(f"World model learning rate = {world_model.scheduler.get_last_lr()}")
-#        plotter.wm_loss.append(loss)
 
     if CONTROLLER_TRAIN:
         if i >= 100000:

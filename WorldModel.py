@@ -25,7 +25,7 @@ class MDNRNN(nn.Module):
         self.mu_layer = nn.Linear(hidden_dim, num_gaussians * latent_dim)  # Means
 
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        self.scheduler = ReduceLROnPlateau(self.optimizer, mode='min', factor=0.1, patience=100)
+        self.scheduler = ReduceLROnPlateau(self.optimizer, mode='min', factor=0.1, patience=20)
 
         self.h_t = None
         self.c_t = None
@@ -149,13 +149,16 @@ def sample_mdn(pi, sigma, mu):
     - sampled_mu: Tensor of shape (batch_size, output_dim), sampled mean (more stable)
     """
     # Add sequence length dimension if not present
-    if len(pi.shape) == 2:
+    num_pi_dims = len(pi.shape)
+    num_sigma_dims = len(sigma.shape)
+    num_mu_dims = len(mu.shape)
+    if num_pi_dims == 2:
         pi = pi.unsqueeze(0)
-    if len(sigma.shape) == 2:
+    if num_sigma_dims == 2:
         sigma = sigma.unsqueeze(0)
-    if len(mu.shape) == 2:
+    if num_mu_dims == 2:
         mu = mu.unsqueeze(0)
-
+    
     seq_len, batch_size, num_gaussians = pi.shape
     output_dim = mu.shape[2] // num_gaussians  # Infer output dimension
     
@@ -177,4 +180,7 @@ def sample_mdn(pi, sigma, mu):
     epsilon = torch.randn_like(sampled_sigma)
     sampled_y = sampled_mu + sampled_sigma * epsilon  # Reparameterization trick
 
-    return sampled_y.squeeze(0), sampled_mu.squeeze(0)
+    if num_pi_dims == 2 or num_mu_dims == 2 or num_sigma_dims == 2:
+        return sampled_y.squeeze(0), sampled_mu.squeeze(0)
+    else:
+        return sampled_y, sampled_mu

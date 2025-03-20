@@ -89,4 +89,4 @@ def plot_loss(losses):
     plt.title("World Model Training Loss")
     plt.legend()
     plt.grid(True)
-    plt.show()
+    plt.show(block=False)

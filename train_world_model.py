@@ -10,13 +10,14 @@ from worlds import small_worlds
 from Environment import GridWorld
 from utils import plot_loss
 
-from params import OBS_SIZE, LATENT_DIM, ACTION_SIZE, HIDDEN_DIM, WORLD_INDEX, BATCH_SIZE
+from params import BATCH_SIZE, OBS_SIZE, LATENT_DIM, ACTION_SIZE, HIDDEN_DIM, WORLD_INDEX
 
+BATCH_SIZE=128
 VAE_DIR = "models/vae_small_latent_12.pth"
 WM_DIR = "models/world_model_01.pth"
 DATASET_PATH = "wm_data.pt"
 PRELOAD_WM = False
-NUM_TRAJECTORIES = 10000
+NUM_TRAJECTORIES = 100000
 EARLY_STOPPING_PATIENCE = 10
 
 class TrajectoryDataset(Dataset):
@@ -102,7 +103,6 @@ def generate_dataset(vae, grid_worlds, world_index=WORLD_INDEX, num_trajectories
             latent_states[t] = latent_state.squeeze(0)
             next_latent_states[t] = next_latent_state.squeeze(0)
             mask[t] = 1
-            breakpoint()
 
             # Update state
             state = next_state
@@ -121,7 +121,7 @@ def generate_dataset(vae, grid_worlds, world_index=WORLD_INDEX, num_trajectories
     torch.save(dataset, DATASET_PATH)
     print("Dataset generation completed and saved.")
 
-def train_world_model(world_model, dataloader, epochs=100, early_stopping_patience=100, checkpoint_path=WM_DIR):
+def train_world_model(world_model, dataloader, epochs=200, early_stopping_patience=30, checkpoint_path=WM_DIR):
     """
     Trains the world model using the pre-generated dataset with early stopping and checkpoints.
 
@@ -135,36 +135,34 @@ def train_world_model(world_model, dataloader, epochs=100, early_stopping_patien
     Returns:
         None
     """
-    breakpoint()
     best_loss = float("inf")
     early_stopping_counter = 0
     losses = []
 
     for epoch in range(epochs):
         print(f"Training Epoch: {epoch}")
-        total_loss = 0
+        epoch_loss = 0
         for actions, latent_states, next_latent_states, mask in dataloader:
             # Train world model
             loss = world_model.train_sequence(actions, latent_states, next_latent_states, mask)
-            world_model.scheduler.step(loss)
 
-            print(f"Loss: {loss:.5f}, Learning rate: {world_model.scheduler.get_last_lr()[0]}")
+            #print(f"Loss: {loss:.5f}, Learning rate: {world_model.scheduler.get_last_lr()[0]}")
             losses.append(loss)
-            plot_loss(losses)
-            total_loss += loss.item()
+            epoch_loss += loss
 
-            # Early Stopping & Checkpoints
-            if loss < best_loss:
-                best_loss = loss
-                early_stopping_counter = 0
-                print("Saving checkpoint...")
-                torch.save(world_model.state_dict(), checkpoint_path)
-            else:
-                early_stopping_counter += 1
-                if early_stopping_counter >= early_stopping_patience:
-                    print("Early stopping triggered! Training stopped.")
-                    break
-        print(f"Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(dataloader):4f}")
+        # Early Stopping & Checkpoints
+        if epoch_loss < best_loss:
+            best_loss = epoch_loss
+            early_stopping_counter = 0
+            print("Saving checkpoint...")
+            torch.save(world_model.state_dict(), checkpoint_path)
+        else:
+            early_stopping_counter += 1
+            if early_stopping_counter >= early_stopping_patience:
+                print("Early stopping triggered! Training stopped.")
+                break
+        world_model.scheduler.step(epoch_loss)
+        print(f"Epoch {epoch+1}/{epochs}, Loss: {epoch_loss/len(dataloader):4f}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
