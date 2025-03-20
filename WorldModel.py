@@ -105,8 +105,6 @@ class MDNRNN(nn.Module):
         sigma = torch.exp(self.sigma_layer(y))  # Ensure positive std dev
         mu = self.mu_layer(y)
 
-        sampled_y, _ = sample_mdn(pi, sigma, mu)
-        #mse_loss = F.mse_loss(sampled_y, next_observations)
         loss = mdn_loss(pi, sigma, mu, next_observations)# + 0.2*mse_loss
         loss = loss * mask
         loss = loss.sum() / mask.sum()
@@ -137,19 +135,6 @@ def mdn_loss(pi, sigma, mu, target):
 
     return -log_prob
     
-#    # Compute Gaussian probability for each mixture
-#    gaussian = (1.0 / (torch.sqrt(torch.tensor(2 * torch.pi)) * sigma)) * \
-#               torch.exp(-0.5 * ((target - mu) / sigma) ** 2)
-#    
-#    # Weighted sum of Gaussians
-#    weighted_gaussians = pi * gaussian
-#    prob = torch.sum(weighted_gaussians, dim=2) # sum over mixture components
-#    
-#    # Negative log-likelihood loss
-#    nll_loss = -torch.log(prob + 1e-8).mean()  # Adding small epsilon for stability
-#    
-#    return nll_loss
-
 def sample_mdn(pi, sigma, mu):
     """
     Samples from a Gaussian Mixture Model given the MDN parameters.

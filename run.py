@@ -11,26 +11,10 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from Memory import TransitionGCSL, ReplayMemory, ExperienceMemory
 from VAE import VAE, vae_loss_fn
-from WorldModel import MDNRNN, sample_mdn
+from WorldModel import MDNRNN, sample_mdn_mix
 from worlds import small_worlds
 from utils import Plotter
-
-VAE_DIR = "models/vae_small_latent_12.pth"
-VAE_TRAIN = False
-WM_DIR = "models/world_model_01.pth"
-WM_TRAIN = True
-#WM_TRAIN = False
-CONTROLLER_DIR = "models/controller_01.pth"
-CONTROLLER_TRAIN = True
-#CONTROLLER_TRAIN = False
-
-OBS_SIZE = 5
-LATENT_DIM = 12
-HIDDEN_DIM = 256
-ACTION_SIZE = 4
-
-WORLD_INDEX = 0
-BATCH_SIZE = 32
+from params import *
 
 plotter = Plotter()
 
@@ -104,7 +88,8 @@ if not CONTROLLER_TRAIN:
 
 goal = np.full((5, 5), 0, dtype=np.float32)
 batch_trajectories = []
-for i in range(2000):
+wm_best_loss = float("inf")
+for i in range(100000):
     print("Epoch: " + str(i))
     state, info = grid_worlds[WORLD_INDEX].reset(goal)
     predictive_hidden_state, _, _, _ = world_model.reset_hidden_state()
@@ -125,7 +110,7 @@ for i in range(2000):
             next_state, reward, terminated, truncated, _ = grid_worlds[WORLD_INDEX].step(torch.argmax(action, dim=1).item())
 
             # World Model
-            predictive_hidden_state, pi, sigma, mu  = world_model(action, latent_state)
+            predictive_hidden_state, pi, mu, L  = world_model(action, latent_state)
     
             # VAE
             next_latent_state, _ = vae.encode(torch.tensor(next_state["agent"]).unsqueeze(0))
@@ -133,8 +118,8 @@ for i in range(2000):
         trajectory.append(TransitionGCSL(state["agent"], latent_state, predictive_hidden_state, next_latent_state, action, goal))
 
         # Apply mapping to latent space
-        _, y = sample_mdn(pi, sigma, mu)
-        #breakpoint()
+        y, _ = sample_mdn_mix(pi, mu, L)
+        breakpoint()
 
         prediction_error = experience_memory.criterion(y, next_latent_state)
         experience_memory.append(state["agent"], latent_state, predictive_hidden_state, next_latent_state, prediction_error)
@@ -184,6 +169,12 @@ for i in range(2000):
         plotter.wm_loss.append(loss)
 
         batch_trajectories = []
+        # Checkpoints
+        if loss < wm_best_loss:
+            wm_best_loss = loss
+            print("Saving checkpoint...")
+            torch.save(world_model.state_dict(), WM_DIR)
+
 
 #    if WM_TRAIN:
 #        # Train WorldModelRNN
@@ -206,9 +197,9 @@ for i in range(2000):
 #        plotter.wm_loss.append(loss)
 
     if CONTROLLER_TRAIN:
-        if i >= 1500:
+        if i >= 100000:
             # Train controller only if enough data is available
-            replay_memory.insert_trajectory(trajectory, i-1500)
+            replay_memory.insert_trajectory(trajectory, i-100000)
             if len(replay_memory) < 20:
                 continue
     

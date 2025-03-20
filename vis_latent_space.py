@@ -5,9 +5,9 @@ import numpy as np
 
 from VAE import VAE
 
-VAE_DIR = "models/vae_small_02.pth"
+VAE_DIR = "models/vae_small_latent_12.pth"
 OBS_SIZE = 5
-LATENT_DIM = 4
+LATENT_DIM = 12
 
 vae = VAE(input_dim=OBS_SIZE, latent_dim=LATENT_DIM, hidden_dim=256)
 
