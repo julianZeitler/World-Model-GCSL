@@ -1,10 +1,11 @@
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 from Controller import Controller
 from Environment import GridWorld
 
 from itertools import count
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader, TensorDataset
@@ -36,7 +37,7 @@ for name, param in world_model.named_parameters():
 replay_memory = ReplayMemory(10000)
 experience_memory = ExperienceMemory(10000)
 
-
+BATCH_SIZE = 32
 # Train VAE
 if not VAE_TRAIN:
     vae.load_state_dict(torch.load(VAE_DIR, weights_only=True))
@@ -47,35 +48,36 @@ else:
     observations = np.array([obs["agent"] for world_obs in observations for obs in world_obs])
 
     # Convert observations to a PyTorch tensor
-    observations_tensor = torch.tensor(observations).unsqueeze(1)  # Add channel dim (N, 1, H, W)
+    observations_tensor = torch.tensor(observations)
     
     # Create a DataLoader for batching
     dataset = TensorDataset(observations_tensor)
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
 
     print("Training VAE...")
-    for epoch in range(100000 // len(dataloader)):  # Iterate over epochs
+    for epoch in range(10000):  # Iterate over epochs
+        epoch_loss = 0
         for batch in dataloader:
             batch_obs = batch[0]  # Get the batch
             
             vae_optimizer.zero_grad()
-            obs_reconstructed, mean, log_var = vae(batch_obs)
+            obs_reconstructed, _, mean, log_var = vae(batch_obs)
             loss = vae_loss_fn(batch_obs, obs_reconstructed, mean, log_var, beta=0.0001, target_std=0.1)
             
             loss.backward()
             vae_optimizer.step()
             vae_scheduler.step(loss)
+            epoch_loss += loss.item()
             plotter.vae_loss.append(loss.item())
 
         # Log every 100 iterations
-        if epoch % 100 == 0:
+        if epoch % 10 == 0:
             plotter.plot_training()
     torch.save(vae.state_dict(), VAE_DIR)
 
-
 def show_hidden(state):
     plt.figure()
-    plt.imshow(vae.decode(state).squeeze().detach().numpy())
+    plt.imshow(F.sigmoid(vae.decode(state)).squeeze().detach().numpy())
     plt.show(block=False)
 
 if not WM_TRAIN:
@@ -96,8 +98,8 @@ for i in range(100000):
     predictive_hidden_state = predictive_hidden_state.squeeze(0)
 
     with torch.no_grad():
-        latent_state, _ = vae.encode(torch.tensor(state["agent"]).unsqueeze(0))
-        goal, _ = vae.encode(torch.tensor(goal).unsqueeze(0))
+        latent_state, _, _ = vae.encode(torch.tensor(state["agent"]).unsqueeze(0))
+        goal, _, _ = vae.encode(torch.tensor(goal).unsqueeze(0))
         action = torch.tensor([[1, 0, 0, 0]], dtype=torch.float32)
     trajectory = []
     for t in count():
@@ -113,13 +115,13 @@ for i in range(100000):
             predictive_hidden_state, pi, sigma, mu = world_model(action, latent_state)
     
             # VAE
-            next_latent_state, _ = vae.encode(torch.tensor(next_state["agent"]).unsqueeze(0))
+            next_latent_state, _, _ = vae.encode(torch.tensor(next_state["agent"]).unsqueeze(0))
 
         trajectory.append(TransitionGCSL(state["agent"], latent_state, predictive_hidden_state, next_latent_state, action, goal))
 
         # Apply mapping to latent space
         y, _ = sample_mdn(pi, sigma, mu)
-        #breakpoint()
+        breakpoint()
 
         prediction_error = experience_memory.criterion(y, next_latent_state)
         experience_memory.append(state["agent"], latent_state, predictive_hidden_state, next_latent_state, prediction_error)

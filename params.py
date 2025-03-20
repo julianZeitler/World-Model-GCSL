@@ -1,5 +1,5 @@
-VAE_DIR = "models/vae_small_latent_12.pth"
-VAE_TRAIN = False
+VAE_DIR = "models/vae_simple_latent_12.pth"
+VAE_TRAIN = True
 WM_DIR = "models/world_model_01.pth"
 WM_TRAIN = True
 #WM_TRAIN = False
@@ -13,4 +13,4 @@ HIDDEN_DIM = 64
 ACTION_SIZE = 4
 
 WORLD_INDEX = 0
-BATCH_SIZE = 32
+BATCH_SIZE = 128

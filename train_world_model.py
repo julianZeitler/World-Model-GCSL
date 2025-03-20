@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import argparse
@@ -79,7 +80,7 @@ def generate_dataset(vae, grid_worlds, world_index=WORLD_INDEX, num_trajectories
         state, _ = grid_worlds[world_index].reset(goal)
 
         with torch.no_grad():
-            latent_state, _ = vae.encode(torch.tensor(state["agent"]).unsqueeze(0))
+            latent_state, _, _ = vae.encode(torch.tensor(state["agent"]).unsqueeze(0))
 
         # Pad tensors
         max_seq_len = 99
@@ -97,7 +98,7 @@ def generate_dataset(vae, grid_worlds, world_index=WORLD_INDEX, num_trajectories
                 # Step in environment
                 next_state, _, terminated, truncated, _ = grid_worlds[world_index].step(action_index.item())
                 # Encode next state
-                next_latent_state, _ = vae.encode(torch.tensor(next_state["agent"]).unsqueeze(0))
+                next_latent_state, _, _ = vae.encode(torch.tensor(next_state["agent"]).unsqueeze(0))
 
             actions[t] = action
             latent_states[t] = latent_state.squeeze(0)

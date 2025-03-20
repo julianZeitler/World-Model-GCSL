@@ -14,53 +14,43 @@ class VAE(nn.Module):
         """
 
         super(VAE, self).__init__()
-
+        self.input_dim = input_dim
+        
         # Encoder
-        self.conv1 = nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)
-        self.fc1 = nn.Linear(32 * input_dim * input_dim, hidden_dim)
+        self.fc_enc_1 = nn.Linear(input_dim*input_dim, 2*hidden_dim)
+        self.fc_enc_2 = nn.Linear(2*hidden_dim, hidden_dim)
         self.fc_mu = nn.Linear(hidden_dim, latent_dim)
         self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
         
         # Decoder
-        self.fc2 = nn.Linear(latent_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, 32 * input_dim * input_dim)
-        self.deconv1 = nn.ConvTranspose2d(32, 16, kernel_size=3, stride=1, padding=1)
-        self.deconv2 = nn.ConvTranspose2d(16, 1, kernel_size=3, stride=1, padding=1)
+        self.fc_dec_1 = nn.Linear(latent_dim, hidden_dim)
+        self.fc_dec_2 = nn.Linear(hidden_dim, input_dim * input_dim)
 
-    def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        # Add missing singleton dimensions
-        if len(x.shape) == 2:
-            x = x.unsqueeze(0).unsqueeze(0)
-        elif len(x.shape) == 3:
-            x = x.unsqueeze(0)
-
-        h = F.relu(self.conv1(x))
-        h = F.relu(self.conv2(h))
-        h = h.view(h.size(0), -1)
-        h = F.relu(self.fc1(h))
+    def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        h = x.view(-1, self.input_dim * self.input_dim)
+        h = F.relu(self.fc_enc_1(h))
+        h = F.relu(self.fc_enc_2(h))
         mean = self.fc_mu(h)
-        log_var = self.fc_logvar(h) # torch.clamp(self.log_var(x), min=-10, max=10)
-        return mean, log_var
+        log_var = self.fc_logvar(h)
+        z = self.sample_z(mean, log_var)
+        return z, mean, log_var
 
-    def reparameterize(self, mean: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
+    def sample_z(self, mean: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
         assert mean.shape == log_var.shape
         std = torch.exp(0.5 * log_var)
-        eps = torch.randn_like(std) # sample with size of std from normal distribution with mean 0 and var 1
-        return mean + eps * std # calculate z and return
+        normal_dist = torch.distributions.Normal(mean, std)
+        return normal_dist.rsample()
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:
-        h = F.relu(self.fc2(z))
-        h = F.relu(self.fc3(h))
-        h = h.view(h.size(0), 32, 5, 5)
-        h = F.relu(self.deconv1(h))
-        return torch.sigmoid(self.deconv2(h))  # Sigmoid for binary values
+        h = F.relu(self.fc_dec_1(z))
+        h = F.relu(self.fc_dec_2(h))
+        h = h.view(-1, self.input_dim, self.input_dim)
+        return h
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        mean, log_var = self.encode(x)
-        z = self.reparameterize(mean, log_var)
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        z, mean, log_var = self.encode(x)
         x_reconstructed = self.decode(z)
-        return x_reconstructed, mean, log_var
+        return x_reconstructed, z, mean, log_var
 
 def vae_loss_fn(x: torch.Tensor, x_reconstructed: torch.Tensor, mean: torch.Tensor, log_var: torch.Tensor, beta: float = 1, target_std: float = 0.1) -> torch.Tensor:
     """
@@ -77,7 +67,8 @@ def vae_loss_fn(x: torch.Tensor, x_reconstructed: torch.Tensor, mean: torch.Tens
 
     """
     # Reconstruction loss
-    recon_loss = F.binary_cross_entropy(x_reconstructed, x)
+    bce_loss = nn.BCEWithLogitsLoss()
+    recon_loss = bce_loss(x_reconstructed, x)
 
     # Modified KL-divergence that allows the mean to be arbitrary
     target_var = target_std ** 2
