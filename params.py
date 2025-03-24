@@ -1,4 +1,4 @@
-VAE_DIR = "models/vae_simple_latent_12.pth"
+VAE_DIR = "models/vae_small_latent_12_conv.pth"
 VAE_TRAIN = True
 WM_DIR = "models/world_model_01.pth"
 WM_TRAIN = True

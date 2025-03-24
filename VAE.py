@@ -17,21 +17,27 @@ class VAE(nn.Module):
         self.input_dim = input_dim
         
         # Encoder
-        self.fc_enc_1 = nn.Linear(input_dim*input_dim, 2*hidden_dim)
-        self.fc_enc_2 = nn.Linear(2*hidden_dim, hidden_dim)
+        self.conv1 = nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)
+        self.fc_enc_1 = nn.Linear(32 * input_dim * input_dim, hidden_dim)
         self.fc_mu = nn.Linear(hidden_dim, latent_dim)
         self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
         
         # Decoder
         self.fc_dec_1 = nn.Linear(latent_dim, hidden_dim)
-        self.fc_dec_2 = nn.Linear(hidden_dim, input_dim * input_dim)
+        self.fc_dec_2 = nn.Linear(hidden_dim, 32 * input_dim * input_dim)
+        self.deconv1 = nn.ConvTranspose2d(32, 16, kernel_size=3, stride=1, padding=1)
+        self.deconv2 = nn.ConvTranspose2d(16, 1, kernel_size=3, stride=1, padding=1)
 
     def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        h = x.view(-1, self.input_dim * self.input_dim)
+        x = x.view(-1, 1, self.input_dim, self.input_dim)
+        h = F.relu(self.conv1(x))
+        h = F.relu(self.conv2(h))
+        h = h.view(-1, 32 * self.input_dim * self.input_dim)
         h = F.relu(self.fc_enc_1(h))
-        h = F.relu(self.fc_enc_2(h))
         mean = self.fc_mu(h)
         log_var = self.fc_logvar(h)
+
         z = self.sample_z(mean, log_var)
         return z, mean, log_var
 
@@ -44,6 +50,9 @@ class VAE(nn.Module):
     def decode(self, z: torch.Tensor) -> torch.Tensor:
         h = F.relu(self.fc_dec_1(z))
         h = F.relu(self.fc_dec_2(h))
+        h = h.view(-1, 32, self.input_dim, self.input_dim)
+        h = F.relu(self.deconv1(h))
+        h = self.deconv2(h)
         h = h.view(-1, self.input_dim, self.input_dim)
         return h
 

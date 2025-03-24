@@ -55,7 +55,7 @@ else:
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
 
     print("Training VAE...")
-    for epoch in range(10000):  # Iterate over epochs
+    for epoch in range(500):  # Iterate over epochs
         epoch_loss = 0
         for batch in dataloader:
             batch_obs = batch[0]  # Get the batch
@@ -72,6 +72,7 @@ else:
 
         # Log every 100 iterations
         if epoch % 10 == 0:
+            print(f"Epoch {epoch}/500")
             plotter.plot_training()
     torch.save(vae.state_dict(), VAE_DIR)
 
@@ -121,7 +122,6 @@ for i in range(100000):
 
         # Apply mapping to latent space
         y, _ = sample_mdn(pi, sigma, mu)
-        breakpoint()
 
         prediction_error = experience_memory.criterion(y, next_latent_state)
         experience_memory.append(state["agent"], latent_state, predictive_hidden_state, next_latent_state, prediction_error)
