@@ -1,8 +1,8 @@
 VAE_DIR = "models/vae_small_latent_12_conv.pth"
-VAE_TRAIN = True
+VAE_TRAIN = False
 WM_DIR = "models/world_model_01.pth"
-WM_TRAIN = True
-#WM_TRAIN = False
+#WM_TRAIN = True
+WM_TRAIN = False
 CONTROLLER_DIR = "models/controller_01.pth"
 CONTROLLER_TRAIN = True
 #CONTROLLER_TRAIN = False

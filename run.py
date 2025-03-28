@@ -92,7 +92,7 @@ if not CONTROLLER_TRAIN:
 goal = np.full((5, 5), 0, dtype=np.float32)
 batch_trajectories = []
 wm_best_loss = float("inf")
-for i in range(100000):
+for i in range(1000):
     print("Epoch: " + str(i))
     state, info = grid_worlds[WORLD_INDEX].reset(goal)
     predictive_hidden_state, _, _, _ = world_model.reset_hidden_state()
@@ -122,6 +122,7 @@ for i in range(100000):
 
         # Apply mapping to latent space
         y, _ = sample_mdn(pi, sigma, mu)
+        #breakpoint()
 
         prediction_error = experience_memory.criterion(y, next_latent_state)
         experience_memory.append(state["agent"], latent_state, predictive_hidden_state, next_latent_state, prediction_error)
@@ -178,9 +179,9 @@ for i in range(100000):
             torch.save(world_model.state_dict(), WM_DIR)
 
     if CONTROLLER_TRAIN:
-        if i >= 100000:
+        if i >= 0:
             # Train controller only if enough data is available
-            replay_memory.insert_trajectory(trajectory, i-100000)
+            replay_memory.insert_trajectory(trajectory, i-0)
             if len(replay_memory) < 20:
                 continue
     

@@ -14,7 +14,7 @@ from utils import plot_loss
 from params import BATCH_SIZE, OBS_SIZE, LATENT_DIM, ACTION_SIZE, HIDDEN_DIM, WORLD_INDEX
 
 BATCH_SIZE=128
-VAE_DIR = "models/vae_small_latent_12.pth"
+VAE_DIR = "models/vae_small_latent_12_conv.pth"
 WM_DIR = "models/world_model_01.pth"
 DATASET_PATH = "wm_data.pt"
 PRELOAD_WM = False
@@ -173,7 +173,7 @@ if __name__ == "__main__":
     grid_worlds = [GridWorld(width=world.shape[0], height=world.shape[1], horizon=100, obstacles=np.argwhere(world==1)) for world in small_worlds]
     
     vae = VAE(input_dim=OBS_SIZE, latent_dim=LATENT_DIM, hidden_dim=256)
-    world_model = MDNRNN(latent_dim=LATENT_DIM, action_dim=ACTION_SIZE, hidden_dim=HIDDEN_DIM, num_layers=5, num_gaussians=10, lr=1e-3)
+    world_model = MDNRNN(latent_dim=LATENT_DIM, action_dim=ACTION_SIZE, hidden_dim=HIDDEN_DIM, num_layers=1, num_gaussians=1, lr=1e-3)
     
     # Load models
     vae.load_state_dict(torch.load(VAE_DIR, weights_only=True))
